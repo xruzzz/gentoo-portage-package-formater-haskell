@@ -1,71 +1,108 @@
 {-# LANGUAGE OverloadedStrings, RecordWildCards, UnicodeSyntax #-}
 import System.IO(readFile)
 import Control.Monad (mapM)
-import qualified Data.ByteString as BS (concat, ByteString) 
-import qualified Data.ByteString.Char8 as BSC8 (pack, unpack,unwords)
-import Text.ParserCombinators.Parsec ( (<|>), anyChar, char, many, noneOf, parse, string, GenParser (..),ParseError(..)) -- as PAR
-import Types (Package (..))
+import qualified Data.ByteString as BS (ByteString, concat, putStrLn, readFile) 
+import qualified Data.ByteString.Char8 as BSC8 (lines, pack, unpack,unwords)
+import Text.ParserCombinators.Parsec as PS( (<|>),(<?>), anyChar, char, digit, letter, many, many1, noneOf, oneOf, parse, try, GenParser (..),ParseError(..)) -- as PAR
+import Text.Parsec.ByteString as PSBSL (GenParser (..), Parser)
+import Text.Parsec.Prim (tokens)
+import Text.Parsec.Pos (updatePosChar, updatePosString)
+import Types (AXTUsesLine(..), Comments, UsesBlock(..), UsesInfo(..))
+import Control.Monad (liftM)
 
-pr ∷ GenParser Char st String
-pr =    string "="
-    <|> string ">="
-    <|> string "<="
+string ∷ String -> PSBSL.GenParser Char st BS.ByteString
+string s = liftM BSC8.pack (tokens show updatePosString s)
 
--- namepkg ∷ String -> GenParser Char st String
-namepkg ∷ GenParser Char st String
-namepkg = many $ noneOf " \t" -- anyChar -- (oneOf (['A' .. 'Z']++['a' .. 'z']))
+act ∷ PSBSL.GenParser Char st BS.ByteString
+act = do
+    d ← char '#'
+    return $ BSC8.pack [d]
 
-use1 ∷ GenParser Char st String
+pr ∷ PSBSL.GenParser Char st BS.ByteString
+pr = do 
+        prs ← many $ oneOf "=><"
+        return $ BSC8.pack prs
+    <|> do
+        return nu
+
+-- repack ∷ PSBSL.GenParser Char st BS.ByteString
+-- repack = return . BSC8.pack
+
+ident = many1 (letter <|> digit <|> oneOf "_.,:(){}-#@&*|/") >>= return
+
+namepkg ∷ PSBSL.GenParser Char st BS.ByteString
+namepkg = ident >>= return . BSC8.pack
+
+use1 ∷ PSBSL.GenParser Char st BS.ByteString
 use1 = namepkg
 
-usess = use1
+usess ∷ PSBSL.GenParser Char st [BS.ByteString]
+usess = many use1
 
-comments ∷ GenParser Char st String
-comments = do
-    char '#'
-    stringSpaces
-    sr <- many $ noneOf " \t"
-    return sr
+comment1 ∷ PSBSL.GenParser Char st Comments
+comment1 = do
+        s ← char '#'
+--        many $ oneOf " \t"
+        sr ← many anyChar
+        char '\n'
+        return . BSC8.pack $ s:sr
+    <|> return nu
 
-stringSpaces ∷ GenParser Char st String
-stringSpaces = many (char ' ' <|> char '\t')
+commentInEnd ∷ PSBSL.GenParser Char st Comments
+commentInEnd = do
+        s ← char '#'
+        sr ← many anyChar
+        return . BSC8.pack $ s:sr
+    <|> return nu
+{-
+stringSpaces ∷ PSBSL.GenParser Char st ()
+stringSpaces = do
+    many $ oneOf " \t"
+    return ()
+    -}
 
-mpl ∷ GenParser Char st [String]
+mpl ∷ PSBSL.GenParser Char st (BS.ByteString, [BS.ByteString])
 mpl = do
-    nm <- namepkg
-    stringSpaces
-    uss <- usess
-    return [nm, uss] 
--- lineConf ∷ String -> Either ParseError [String]
-lineConf ∷ GenParser Char st [String]
-lineConf = do
-        mpl
-    <|> do
-        pr
-        mpl
-    <|> do
-        pr
-        mpl
---        stringSpaces
---        comments
-    <|> do
-        mpl
---        stringSpaces
---        comments
+    nm ← namepkg
+    many $ oneOf " \t"
+    uss ← usess
+    return (nm, uss)
 
--- import System.Directory
+nu = BSC8.pack ""
+
+startUsesInfoLine ∷ PSBSL.GenParser Char st BS.ByteString
+startUsesInfoLine = (char '#' >>= return . BSC8.pack. (\x->[x]))
+    <|> return (nu)
+
+lineConf ∷ PSBSL.GenParser Char st UsesInfo
+lineConf = do
+        ac  ← startUsesInfoLine
+        prs ← pr
+        nm  ← namepkg
+        many $ oneOf " \t"
+        uss ← many $ noneOf "#"
+        cm  ← commentInEnd
+        return $ UsesInfo ac prs nm cm (map BSC8.pack $ words uss)
+    <?> "тест вопроса ?"
+
+usesBlock ∷ PSBSL.GenParser Char st UsesBlock
+usesBlock = do
+    lc ← comment1
+    comment1
+    comment1
+    ui ← lineConf
+    return $ UsesBlock ui [lc]
 
 -- parseLine ∷ String -> Either ParseError [[String]]
-parseLine ∷ String -> Either ParseError [String]
-parseLine = parse lineConf "(unknown)"
+parseLine ∷ BS.ByteString -> Either PS.ParseError UsesInfo
+parseLine = parse (lineConf) "(unknown)"
 
 testStr1 = "app-arch/bzip2-1.0.6-r7     abi_x86_32"
-testStr2 = ">=app-arch/bzip2-1.0.6-r7     abi_x86_32"
+testStr2 = "#>=app-arch/bzip2-1.0.6-r7     abi_x86_32"
 
 main ∷ IO ()
 main = do
-    contents ← lines <$> readFile "/etc/portage/package.use"
---    putStrLn "1ᚣ"
-    let cn = take 5 contents
-    print $ parseLine testStr1
-    mapM_ putStrLn cn
+    contents ← BS.readFile "/etc/portage/package.use"
+    let cn = take 100 $ BSC8.lines contents
+    mapM_ (print . parseLine) cn
+    mapM_ BS.putStrLn cn
