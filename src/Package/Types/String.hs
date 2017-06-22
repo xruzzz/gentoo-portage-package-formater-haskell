@@ -4,7 +4,7 @@
 {-# LANGUAGE FlexibleContexts #-}
 {-# LANGUAGE ScopedTypeVariables #-}
 {-# LANGUAGE RecordWildCards, DeriveDataTypeable, GeneralizedNewtypeDeriving, UnicodeSyntax #-}
-module Types
+module Package.Types.String
     (
         AXTUsesLine(..),
         Comments,
@@ -12,22 +12,19 @@ module Types
         UsesInfo(..)
     ) where
 
-import qualified Data.ByteString as BS (concat, ByteString) 
-import qualified Data.ByteString.Char8 as BSC8 (pack, unpack,unwords)
-
+import Control.Lens
 -- Формат хранения, который создаёт etc-update
 data UsesBlock = UsesBlock {usesLine ∷ UsesInfo, comments ∷ [Comments]}
     deriving Show
 
-data UsesInfo = UsesInfo { active, predicate, name ∷ BS.ByteString, comment ∷ Comments, uses ∷ [BS.ByteString]}
+data UsesInfo = UsesInfo { active ∷ Bool, predicate, name ∷ String, comment ∷ Comments, uses ∷ [String]}
     deriving Show
 
 -- Строка в новом формате
 newtype AXTUsesLine = AXTUses UsesInfo
-{-
-instance Show AXTUsesLine where
-    show (AXTUses {..}) = (BSC8.unpack $ BS.concat [predicate, name]) ++ ass
-        where ass = "\t\t\t" ++ BSC8.unpack (BSC8.unwords uses) ++ "\t" ++ BSC8.unpack comment
-        -}
 
-type Comments = BS.ByteString
+instance Show AXTUsesLine where
+    show (AXTUses (UsesInfo{..})) = "AXT: " ++ (if active == True then " " else "# ") ++ predicate ++ name ++ ass
+        where ass = "\t\t\t" ++ (unwords uses) ++ "\t" ++ comment
+
+type Comments = String
